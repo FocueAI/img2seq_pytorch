@@ -1,0 +1,9 @@
+data_warehouse/train_raw/*.jpg
+data_warehouse/train_raw/*.png
+data_warehouse/train_raw/*.txt
+data_warehouse/val_raw/*.jpg
+data_warehouse/val_raw/*.png
+data_warehouse/val_raw/*.txt
+*.pt
+*.xml
+runs/
