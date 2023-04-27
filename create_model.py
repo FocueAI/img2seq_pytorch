@@ -38,7 +38,7 @@ def Img2Seq(d_model: int,
     loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_index)
     # val_cer = CharacterErrorRate()
     # test_cer = CharacterErrorRate(tokenizer.ignore_indices)
-    return model, loss_fn, tokenizer.ignore_indices
+    return model, loss_fn, tokenizer
 
 # class CharacterErrorRate(nn.Module):
 #     def __init__(self, ignore_indices: Set[int]=tokenizer.pad_index, *args):

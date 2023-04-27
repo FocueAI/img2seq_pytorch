@@ -19,12 +19,12 @@ dataloader_creator = CreateDataloader(batch_size=8,num_workers=0,pin_memory=Fals
 train_dataloader, val_dataloader = dataloader_creator.do()
 
 # step3: 创建模型/损失函数/评价指标
-img2seq_model, loss_fn, ignore_indices = Img2Seq(d_model=128, dim_feedforward=256, nhead=4,
+img2seq_model, loss_fn, tokenizer = Img2Seq(d_model=128, dim_feedforward=256, nhead=4,
                                           dropout=0.3, num_decoder_layers=3,
                                           max_output_len=150,
                                           vocab_path='data_warehouse/vocab.json'
                                           )
-ignore_indices = torch.from_numpy(np.array(list(ignore_indices)))
+ignore_indices = torch.from_numpy(np.array(list(tokenizer.ignore_indices)))
 # step4: 创建优化器和lr策略器
 optimizer, scheduler = configure_optimizers(model=img2seq_model, init_lr=0.001, weight_decay=0.0001, milestones=[10], gamma=0.001)
 
@@ -45,7 +45,7 @@ if VIEW_MODEL_STRUCTURE:
 dfhistory = model.fit(train_data=train_dataloader,
                       val_data=val_dataloader,
                       epochs=20,
-                      patience=3,
+                      patience=10,
                       monitor="train_loss",
                       mode="max",
                       ckpt_path='checkpoint.pt',
