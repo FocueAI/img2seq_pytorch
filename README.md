@@ -7,7 +7,7 @@
 ## 三.缺点:
     **目前模型比较大,大概有3.9G左右**  
    <font color=red>todo-list:</font> 1. *自己手写transformer替换nn.transformer(方便修改transformer的结构,利用交互注意力画注意力热图,以及确定bbox)*   
-       2. *想法减少模型的容量*
+         2. *想法减少模型的容量*
 
 ## 四. 该工程的使用步骤  :
    step1: 按照data_warehouse/readme.md中的要求准备数据   
