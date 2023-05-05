@@ -6,6 +6,4 @@ data_warehouse/val_raw/*.png
 data_warehouse/val_raw/*.txt
 *.pt
 *.xml
-*.png
-*.jpg
 runs/
