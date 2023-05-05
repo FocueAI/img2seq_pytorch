@@ -1,8 +1,10 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"]="4"
 import torch
 import numpy as np
 from create_dataloader import CreateDataloader
 from create_model import Img2Seq, Accuracy, CharacterErrorRate
-from utils.train_strategy.common_strategy import configure_optimizers
+from utils.train_strategy.common_strategy import configure_optimizers, configure_optimizers_1
 from toras.summary import summary
 from toras.kerasmodel import KerasModel
 from toras.kerascallbacks import TensorBoardCallback
@@ -14,19 +16,19 @@ VIEW_MODEL_STRUCTURE = False
 tensorboard_record = TensorBoardCallback(save_dir='runs',model_name='img2seq', log_weight=True,log_weight_freq=5)
 
 # step2: 创建训练/验证数据迭代器
-dataloader_creator = CreateDataloader(batch_size=8,num_workers=0,pin_memory=False,dir_path='data_warehouse',
+dataloader_creator = CreateDataloader(batch_size=16,num_workers=2,pin_memory=True,dir_path='data_warehouse',
                                       train_dir_name='train_raw',val_dir_name='val_raw')
 train_dataloader, val_dataloader = dataloader_creator.do()
 
 # step3: 创建模型/损失函数/评价指标
-img2seq_model, loss_fn, tokenizer = Img2Seq(d_model=128, dim_feedforward=256, nhead=4,
-                                          dropout=0.3, num_decoder_layers=3,
+img2seq_model, loss_fn, tokenizer = Img2Seq(d_model=128*2, dim_feedforward=256*2, nhead=8,
+                                          dropout=0.3, num_decoder_layers=6,
                                           max_output_len=150,
                                           vocab_path='data_warehouse/vocab.json'
                                           )
 ignore_indices = torch.from_numpy(np.array(list(tokenizer.ignore_indices)))
 # step4: 创建优化器和lr策略器
-optimizer, scheduler = configure_optimizers(model=img2seq_model, init_lr=0.001, weight_decay=0.0001, milestones=[10], gamma=0.001)
+optimizer, scheduler = configure_optimizers_1(model=img2seq_model, init_lr=0.0001, weight_decay=0.0001)
 
 # step5: 将模型封装成keras格式
 model = KerasModel(img2seq_model,
@@ -41,13 +43,16 @@ if VIEW_MODEL_STRUCTURE:
     input_feature = torch.zeros(32, 1, 28, 28)
     summary(model, input_data=input_feature)
 
-# step7: 模型训练
+# step7: 加载模型权重
+# model.load_ckpt()
+
+# step8: 模型训练
 dfhistory = model.fit(train_data=train_dataloader,
                       val_data=val_dataloader,
-                      epochs=20,
-                      patience=10,
-                      monitor="train_loss",
-                      mode="max",
+                      epochs=2000,
+                      patience=100,
+                      monitor="val_loss",
+                      mode="min",
                       ckpt_path='checkpoint.pt',
                       plot=True,
                       quiet=False,

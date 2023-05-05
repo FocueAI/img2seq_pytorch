@@ -1,4 +1,5 @@
 import math
+from re import I
 from typing import Union
 
 import torch
@@ -7,6 +8,11 @@ import torchvision.models
 from torch import Tensor
 
 from .positional_encoding import PositionalEncoding1D, PositionalEncoding2D
+from .resnet import ResNet, ResBlock
+
+
+
+
 
 
 class ResNetTransformer(nn.Module):
@@ -31,17 +37,24 @@ class ResNetTransformer(nn.Module):
         self.pad_index = pad_index
 
         # Encoder
-        resnet = torchvision.models.resnet18(pretrained=False)  # 直接使用 torch现有的集成的模型结构
-        self.backbone = nn.Sequential(                          # 和论文中的一致,只使用resnet18的前4个卷积层
-            resnet.conv1,
-            resnet.bn1,
-            resnet.relu,
-            resnet.maxpool,
-            resnet.layer1,
-            resnet.layer2,
-            resnet.layer3,
-        )
-        self.bottleneck = nn.Conv2d(256, self.d_model, 1)       # 和论文一致使用了1*1卷积
+        # resnet = torchvision.models.resnet18(pretrained=False)  # 直接使用 torch现有的集成的模型结构
+        # self.backbone = nn.Sequential(                          # 和论文中的一致,只使用resnet18的前4个卷积层
+        #     resnet.conv1,
+        #     resnet.bn1,
+        #     resnet.relu,
+        #     resnet.maxpool,
+        #     resnet.layer1,
+        #     resnet.layer2,
+        #     nn.Conv2d(128, 256, 1) 
+        #     # resnet.layer3,
+        # )
+        # self.bottleneck = nn.Conv2d(256, self.d_model, 1)       # 和论文一致使用了1*1卷积
+        # self.bottleneck = nn.Conv2d(128, self.d_model, 1)       # 和论文一致使用了1*1卷积
+        self.backbone = ResNet(ResBlock)
+        self.bottleneck = nn.Conv2d(512, self.d_model, 1) 
+        
+        
+        
         self.image_positional_encoder = PositionalEncoding2D(self.d_model)                                      # 编码器输入对应的2d位置编码
 
         # Decoder
@@ -117,6 +130,12 @@ class ResNetTransformer(nn.Module):
 
         Returns:
             (Sy, B, num_classes) logits
+        """
+        # TODO:要给padding后的词加mask
+        
+        """
+        def get_pad_mask(seq, pad_idx):
+            return (seq != pad_idx).unsqueeze(-2)
         """
         y = y.permute(1, 0)  # (Sy, B)
         y = self.embedding(y) * math.sqrt(self.d_model)  # (Sy, B, E)

@@ -33,19 +33,19 @@ class StepRunner:  # 数据跑一步的逻辑
         # loss
         ##----------------- 原始的写法 --------------------##
         # preds = self.net(features)
+        # loss = self.loss_fn(preds, labels)
         ##----------------- 修改后的写法 ------------------##
-        preds = self.net(features, labels)
-        # output = self.net.decode(labels,encoded_x)
-        # preds = output.permute(1, 2, 0)
+        preds = self.net(features, labels[:,:-1])
+        loss = self.loss_fn(preds, labels[:,1:])
         ## ----------------------------------------------##
-        loss = self.loss_fn(preds, labels)
+        
 
         # backward()
         if self.optimizer is not None and self.stage == "train":
             self.accelerator.backward(loss)
             self.optimizer.step()
-            if self.lr_scheduler is not None:
-                self.lr_scheduler.step()
+            # if self.lr_scheduler is not None:  # 感觉在每一步中调整学习率不太好====>人为的换在每一轮结束后做学习率调整
+            #     self.lr_scheduler.step()
             self.optimizer.zero_grad()
 
         all_preds = self.accelerator.gather(preds)
@@ -201,14 +201,17 @@ class KerasModel(torch.nn.Module):
                 val_epoch_runner = self.EpochRunner(val_step_runner, should_quiet)
                 with torch.no_grad():
                     val_metrics = val_epoch_runner(val_dataloader)
-
+                # TODO:-------------------------感觉要在这里添加学习率调整策略--------------------
+                if self.lr_scheduler is not None:
+                    self.lr_scheduler.step(val_metrics['val_loss'])
+                # -----------------------------------------------------------------------
                 for name, metric in val_metrics.items():
                     self.history[name] = self.history.get(name, []) + [metric]
 
                 if self.accelerator.is_local_main_process:
                     for callback_obj in self.callbacks:
                         callback_obj.on_validation_epoch_end(model=self)
-
+               
             # 3，early-stopping -------------------------------------------------
             self.accelerator.wait_for_everyone()
             arr_scores = self.history[monitor]
