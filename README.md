@@ -6,7 +6,7 @@
    ***条目级别准确率:*** right:1493,tot:1547,acc:0.9650937297996122  
 ## 三.缺点:
     **目前模型比较大,大概有3.9G左右**  
-<font color=red>todo-list:</font> 1. *自己手写transformer替换nn.transformer(方便修改transformer的结构,利用交互注意力画注意力热图,以及确定bbox)*   
+   <font color=red>todo-list:</font> 1. *自己手写transformer替换nn.transformer(方便修改transformer的结构,利用交互注意力画注意力热图,以及确定bbox)*   
        2. *想法减少模型的容量*
 
 ## 四. 该工程的使用步骤  :
