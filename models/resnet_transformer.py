@@ -9,9 +9,9 @@ from torch import Tensor
 
 from .positional_encoding import PositionalEncoding1D, PositionalEncoding2D
 from .resnet import ResNet, ResBlock
+from .transformer import Decoder # 使用自定义的transformer-decoder
 
-
-
+use_pytorch_transformer = False # True: 使用pytorch官方的transformer-decoder.  False:使用自定义的transformer-decoder
 
 
 
@@ -61,8 +61,17 @@ class ResNetTransformer(nn.Module):
         self.embedding = nn.Embedding(num_classes, self.d_model)                                                # num_classes = 字典的大小 ???????
         self.y_mask = generate_square_subsequent_mask(self.max_output_len)                                      # 防止学习到未来的词汇
         self.word_positional_encoder = PositionalEncoding1D(self.d_model, max_len=self.max_output_len)          # 解码器输入对应的1d位置编码
-        transformer_decoder_layer = nn.TransformerDecoderLayer(self.d_model, nhead, dim_feedforward, dropout)
-        self.transformer_decoder = nn.TransformerDecoder(transformer_decoder_layer, num_decoder_layers)
+        if use_pytorch_transformer:
+            transformer_decoder_layer = nn.TransformerDecoderLayer(self.d_model, nhead, dim_feedforward, dropout)
+            self.transformer_decoder = nn.TransformerDecoder(transformer_decoder_layer, num_decoder_layers)
+        else:
+            self.transformer_decoder = Decoder(n_layers=num_decoder_layers,
+                                               n_head=nhead,
+                                               d_k=64,d_v=64, # TODO:按照nn.TransformerDecoderLayer,该值应该设置为 d_model?
+                                               d_model=self.d_model,
+                                               dropout= dropout,
+                                               d_inner=2048 # TODO: 后面设置为 dim_feedforward
+                                               )
         self.fc = nn.Linear(self.d_model, num_classes)
 
         # It is empirically important to initialize weights properly
@@ -141,8 +150,19 @@ class ResNetTransformer(nn.Module):
         y = self.embedding(y) * math.sqrt(self.d_model)  # (Sy, B, E)
         y = self.word_positional_encoder(y)  # (Sy, B, E)
         Sy = y.shape[0]
-        y_mask = self.y_mask[:Sy, :Sy].type_as(encoded_x)  # (Sy, Sy)
-        output = self.transformer_decoder(y, encoded_x, y_mask)  # (Sy, B, E)
+        
+        if use_pytorch_transformer:
+            y_mask = self.y_mask[:Sy, :Sy].type_as(encoded_x)  # (Sy, Sy)
+            output = self.transformer_decoder(y, encoded_x, y_mask)  # (Sy, B, E)
+        else:
+            
+            y_mask = self.y_mask[:, :Sy, :Sy]
+            y_mask = y_mask.to(y.device)
+            batch_size = y.size(1)            
+            y_mask = y_mask.repeat(batch_size, 1, 1)
+            output = self.transformer_decoder(y.permute(1,0,2),y_mask, encoded_x.permute(1,0,2), src_mask=None)
+            output = output[0].permute(1,0,2)
+
         output = self.fc(output)  # (Sy, B, num_classes)
         return output
 
@@ -187,9 +207,13 @@ class ResNetTransformer(nn.Module):
 
 def generate_square_subsequent_mask(size: int) -> Tensor:
     """Generate a triangular (size, size) mask."""
-    mask = (torch.triu(torch.ones(size, size)) == 1).transpose(0, 1)
-    mask = mask.float().masked_fill(mask == 0, float("-inf")).masked_fill(mask == 1, float(0.0))
-    return mask
+    if use_pytorch_transformer:
+        mask = (torch.triu(torch.ones(size, size)) == 1).transpose(0, 1)
+        mask = mask.float().masked_fill(mask == 0, float("-inf")).masked_fill(mask == 1, float(0.0))
+        return mask
+    else:
+        subsequent_mask = (1 - torch.triu(torch.ones((1, size, size)), diagonal=1)).bool()
+        return subsequent_mask
 
 
 def find_first(x: Tensor, element: Union[int, float], dim: int = 1) -> Tensor:
