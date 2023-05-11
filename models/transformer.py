@@ -211,8 +211,8 @@ class Encoder(nn.Module):
     ''' A encoder model with self attention mechanism. '''
 
     def __init__(
-            self, d_word_vec, n_layers, n_head, d_k, d_v,
-            d_model, d_inner, dropout=0.1, n_position=200, scale_emb=False):
+            self, n_layers, n_head, d_k, d_v,
+            d_model, d_inner, dropout=0.1, scale_emb=False):
 
         super().__init__()
 
@@ -252,8 +252,8 @@ class Decoder(nn.Module):
     ''' A decoder model with self attention mechanism. '''
 
     def __init__(
-            self, d_word_vec, n_layers, n_head, d_k, d_v,
-            d_model, d_inner, n_position=200, dropout=0.1, scale_emb=False):
+            self, n_layers, n_head, d_k, d_v,
+            d_model, d_inner, dropout=0.1, scale_emb=False):
 
         super().__init__()
 
@@ -331,16 +331,13 @@ class Transformer(nn.Module):
         self.position_enc = PositionalEncoding(d_word_vec, n_position=n_position)
         self.position_dec = PositionalEncoding(d_word_vec, n_position=n_position)
 
-
         self.encoder = Encoder(
-            n_position=n_position,
-            d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
+            d_model=d_model, d_inner=d_inner,
             n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
             dropout=dropout, scale_emb=scale_emb)
 
         self.decoder = Decoder(
-            n_position=n_position,
-            d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
+            d_model=d_model, d_inner=d_inner,
             n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
             dropout=dropout, scale_emb=scale_emb)
 
@@ -385,8 +382,43 @@ class Transformer(nn.Module):
 
 
 if __name__ == '__main__':
-    src = torch.concat([torch.ones(32, 10).long(), torch.zeros(32, 2).long()], dim=1)  # batch_size=32, src_len=10
-    tgt = torch.concat([torch.ones(32, 20).long(), torch.zeros(32, 2).long()], dim=1)  # batch_size=32, dst_len=20
-    Trans_model = Transformer(n_src_vocab=100, n_trg_vocab=100, src_pad_idx=0, trg_pad_idx=0)
-    res = Trans_model(src_seq=src, trg_seq=tgt)
-    print(f'res-shape:{res.shape}, res:{res}')
+    def all():
+        """
+        同时测试 transformer 整体, 包括 encoder + decoder
+        :return:
+        """
+        src = torch.concat([torch.ones(32, 10).long(), torch.zeros(32, 2).long()], dim=1)  # batch_size=32, src_len=10
+        tgt = torch.concat([torch.ones(32, 20).long(), torch.zeros(32, 2).long()], dim=1)  # batch_size=32, dst_len=20
+        Trans_model = Transformer(n_src_vocab=100, n_trg_vocab=100, src_pad_idx=0, trg_pad_idx=0)
+        res = Trans_model(src_seq=src, trg_seq=tgt)
+        print(f'res-shape:{res.shape}')
+
+    def encoder():
+        d_model,src_pad_idx,scale_emb = 512, 0, False
+        n_position = 200
+        # step1: 数据准备
+        src_seq = torch.ones((32, 10)).long()     # batch_size=32, src_len=10, 内容全部都是 字符索引号
+        src_mask = get_pad_mask(src_seq, pad_idx=0)
+        # step2: embedding
+        src_embeding = SrcEmbedding(n_src_vocab=100,
+                                    d_word_vec=d_model,
+                                    pad_idx=src_pad_idx,
+                                    scale_emb=scale_emb)
+        src_seq_embedding = src_embeding(src_seq)
+
+        # step3:　位置编码
+        position_enc = PositionalEncoding(d_model, n_position=n_position)
+        src_seq_embedding_pos = position_enc(src_seq_embedding)
+
+
+        encoder = Encoder(n_layers=6,n_head=3,d_k=64, d_v=64, d_model=512, d_inner=2048)
+        out = encoder(src_seq_embedding_pos, src_mask)
+        # print(f'out.shape:{np.array(out).shape}')
+        print(f'out:{out[0].shape}')
+
+
+    test_level_dict = {'all':all, 'encoder':encoder}
+
+    # test_level_dict['all']()
+    test_level_dict['encoder']()
+
