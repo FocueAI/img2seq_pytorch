@@ -5,7 +5,7 @@ import numpy as np
 import torch.nn.functional as F
 # git clone https://github.com/jadore801120/attention-is-all-you-need-pytorch
 
-__author__ = "Yu-Hsiang Huang"
+__author__ = "Alex"
 
 
 class ScaledDotProductAttention(nn.Module):
@@ -180,24 +180,30 @@ class PositionalEncoding(nn.Module):
 class SrcEmbedding(nn.Module):
     """ 对 encoder 输入的句子做 embedding """
 
-    def __init__(self, n_src_vocab, d_word_vec, pad_idx):
+    def __init__(self, n_src_vocab, d_word_vec, pad_idx, scale_emb=False):
         super(SrcEmbedding, self).__init__()
+        self.__dict__.update(locals())
         self.src_word_emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=pad_idx)
 
     def forward(self, raw_src_seq):
         enc_output = self.src_word_emb(raw_src_seq)
+        if self.scale_emb:
+            enc_output *= self.d_word_vec ** 0.5
         return enc_output
 
 
 class TrgEmbedding(nn.Module):
     """ 对 decoder 输入的句子做 embedding """
 
-    def __init__(self, n_trg_vocab, d_word_vec, pad_idx):
+    def __init__(self, n_trg_vocab, d_word_vec, pad_idx, scale_emb=False):
         super(TrgEmbedding, self).__init__()
+        self.__dict__.update(locals())
         self.dst_word_emb = nn.Embedding(n_trg_vocab, d_word_vec, padding_idx=pad_idx)
 
     def forward(self, raw_trg_seq):
         dec_output = self.dst_word_emb(raw_trg_seq)
+        if self.scale_emb:
+            dec_output *= self.d_word_vec ** 0.5
         return dec_output
 
 
@@ -211,7 +217,7 @@ class Encoder(nn.Module):
         super().__init__()
 
         # self.src_word_emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=pad_idx)
-        self.position_enc = PositionalEncoding(d_word_vec, n_position=n_position)
+        # self.position_enc = PositionalEncoding(d_word_vec, n_position=n_position)
         self.dropout = nn.Dropout(p=dropout)
         self.layer_stack = nn.ModuleList([
             EncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
@@ -220,16 +226,17 @@ class Encoder(nn.Module):
         self.scale_emb = scale_emb
         self.d_model = d_model
 
-    def forward(self, src_seq_embeding, src_mask, return_attns=False):
+    def forward(self, src_seq_embed_posi, src_mask, return_attns=False):
         # src_seq.shape=(batch=32, seq_len=10), src_mask.shape=(batch=32, 1, seq_len=10)
         enc_slf_attn_list = []
 
         # -- Forward
         # enc_output = self.src_word_emb(src_seq) # 把每个字符对应的索引号===>向量   enc_output.shape=(batch=32, seq_len=10, d_model= 512)
-        enc_output = src_seq_embeding
-        if self.scale_emb:
-            enc_output *= self.d_model ** 0.5
-        enc_output = self.dropout(self.position_enc(enc_output))  # 加上位置信息
+        # enc_output = src_seq_embeding
+        # if self.scale_emb:
+        #     enc_output *= self.d_model ** 0.5
+        # enc_output = self.dropout(self.position_enc(enc_output))  # 加上位置信息
+        enc_output = self.dropout(src_seq_embed_posi)
         enc_output = self.layer_norm(enc_output)
 
         for enc_layer in self.layer_stack:
@@ -251,7 +258,7 @@ class Decoder(nn.Module):
         super().__init__()
 
         # self.trg_word_emb = nn.Embedding(n_trg_vocab, d_word_vec, padding_idx=pad_idx)
-        self.position_enc = PositionalEncoding(d_word_vec, n_position=n_position)
+        # self.position_enc = PositionalEncoding(d_word_vec, n_position=n_position)
         self.dropout = nn.Dropout(p=dropout)
         self.layer_stack = nn.ModuleList([
             DecoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
@@ -266,10 +273,12 @@ class Decoder(nn.Module):
 
         # -- Forward
         # dec_output = self.trg_word_emb(trg_seq_embedding)
-        dec_output = trg_seq_embedding
-        if self.scale_emb:
-            dec_output *= self.d_model ** 0.5
-        dec_output = self.dropout(self.position_enc(dec_output))
+        # dec_output = trg_seq_embedding
+        # if self.scale_emb:
+        #     dec_output *= self.d_model ** 0.5
+        # dec_output = self.dropout(self.position_enc(dec_output))
+
+        dec_output = self.dropout(trg_seq_embedding)
         dec_output = self.layer_norm(dec_output)
 
         for dec_layer in self.layer_stack:
@@ -315,8 +324,13 @@ class Transformer(nn.Module):
         self.scale_prj = (scale_emb_or_prj == 'prj') if trg_emb_prj_weight_sharing else False
         self.d_model = d_model
         # 初始化
-        self.src_embeding = SrcEmbedding(n_src_vocab=n_src_vocab, d_word_vec=d_word_vec, pad_idx=src_pad_idx)
-        self.dst_embeding = TrgEmbedding(n_trg_vocab=n_trg_vocab, d_word_vec=d_word_vec, pad_idx=trg_pad_idx)
+        # 独立出来的 embedding 层
+        self.src_embeding = SrcEmbedding(n_src_vocab=n_src_vocab, d_word_vec=d_word_vec, pad_idx=src_pad_idx, scale_emb=scale_emb)
+        self.dst_embeding = TrgEmbedding(n_trg_vocab=n_trg_vocab, d_word_vec=d_word_vec, pad_idx=trg_pad_idx, scale_emb=scale_emb)
+        # 独立出来的 位置 层
+        self.position_enc = PositionalEncoding(d_word_vec, n_position=n_position)
+        self.position_dec = PositionalEncoding(d_word_vec, n_position=n_position)
+
 
         self.encoder = Encoder(
             n_position=n_position,
@@ -353,17 +367,21 @@ class Transformer(nn.Module):
         src_mask = get_pad_mask(src_seq, self.src_pad_idx)  # src_mask.shape:[batch_size=32,1,seq_len=12]
         trg_mask = get_pad_mask(trg_seq, self.trg_pad_idx) & get_subsequent_mask(trg_seq)  # trg_mask.shape:[batch_size=32,seq_len=22,seq_len=22]
 
+        # 实现独立的 embedding 层
         src_seq_embedding = self.src_embeding(src_seq)
         trg_seq_embedding = self.dst_embeding(trg_seq)
-        # TODO: 实现独立的位置位置编码
+
+        # 实现独立的位置位置编码
+        src_seq_embedding = self.position_enc(src_seq_embedding)
+        trg_seq_embedding = self.position_dec(trg_seq_embedding)
 
         enc_output, *_ = self.encoder(src_seq_embedding,src_mask)  # enc_output.shape=[batch_size=32,seq_len=12,d_model=512]
-        dec_output, *_ = self.decoder(trg_seq_embedding, trg_mask, enc_output,src_mask)  # trg_seq.shape=   [batch_size=32,seq_len=22,d_model=512]
+        dec_output, *_ = self.decoder(trg_seq_embedding, trg_mask, enc_output, src_mask)  # trg_seq.shape=   [batch_size=32,seq_len=22,d_model=512]
         seq_logit = self.trg_word_prj(dec_output)  # n_trg_vocab seq_logit.shape=[batch_size=32,seq_len=22,n_trg_vocab=100]
         if self.scale_prj:
             seq_logit *= self.d_model ** -0.5
-
-        return seq_logit.view(-1, seq_logit.size(2))
+        return seq_logit
+        # return seq_logit.view(-1, seq_logit.size(2))
 
 
 if __name__ == '__main__':
