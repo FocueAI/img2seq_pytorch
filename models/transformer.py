@@ -391,14 +391,15 @@ if __name__ == '__main__':
         tgt = torch.concat([torch.ones(32, 20).long(), torch.zeros(32, 2).long()], dim=1)  # batch_size=32, dst_len=20
         Trans_model = Transformer(n_src_vocab=100, n_trg_vocab=100, src_pad_idx=0, trg_pad_idx=0)
         res = Trans_model(src_seq=src, trg_seq=tgt)
+        print('transformer 整体测试..........')
         print(f'res-shape:{res.shape}')
 
-    def encoder():
+    def encoder_only():
         d_model,src_pad_idx,scale_emb = 512, 0, False
         n_position = 200
         # step1: 数据准备
         src_seq = torch.ones((32, 10)).long()     # batch_size=32, src_len=10, 内容全部都是 字符索引号
-        src_mask = get_pad_mask(src_seq, pad_idx=0)
+        src_mask = get_pad_mask(src_seq, pad_idx=src_pad_idx)
         # step2: embedding
         src_embeding = SrcEmbedding(n_src_vocab=100,
                                     d_word_vec=d_model,
@@ -414,11 +415,43 @@ if __name__ == '__main__':
         encoder = Encoder(n_layers=6,n_head=3,d_k=64, d_v=64, d_model=512, d_inner=2048)
         out = encoder(src_seq_embedding_pos, src_mask)
         # print(f'out.shape:{np.array(out).shape}')
+        print('transformer-encoding-only..........')
         print(f'out:{out[0].shape}')
 
 
-    test_level_dict = {'all':all, 'encoder':encoder}
 
-    # test_level_dict['all']()
+    def decoder_only():
+        d_model,trg_pad_idx,scale_emb = 512, 0, False
+        n_position = 200
+        # step1: 数据准备
+        trg_seq = torch.ones((32, 20)).long()     # batch_size=32, src_len=20, 内容全部都是 字符索引号
+        trg_mask = get_pad_mask(trg_seq, pad_idx=trg_pad_idx) & get_subsequent_mask(trg_seq)
+        # step2: embedding
+        trg_embeding = TrgEmbedding(n_trg_vocab=100,
+                                    d_word_vec=d_model,
+                                    pad_idx=trg_pad_idx,
+                                    scale_emb=scale_emb)
+        trg_seq_embedding = trg_embeding(trg_seq)
+
+        # step3:　位置编码
+        position_dec = PositionalEncoding(d_model, n_position=n_position)
+        trg_seq_embedding_pos = position_dec(trg_seq_embedding)
+
+
+        decoder = Decoder(n_layers=6,n_head=3,d_k=64, d_v=64, d_model=512, d_inner=2048)
+
+
+        simulation_encoder_out = torch.ones((32, 10, d_model))
+        out = decoder(trg_seq_embedding_pos, trg_mask, simulation_encoder_out, src_mask=None)
+        # print(f'out.shape:{np.array(out).shape}')
+        print('transformer-decoding-only..........')
+        print(f'out:{out[0].shape}')
+
+
+    test_level_dict = {'all':all, 'encoder':encoder_only, 'decoder':decoder_only}
+    test_level_dict['all']()
     test_level_dict['encoder']()
+    test_level_dict['decoder']()
+
+
 

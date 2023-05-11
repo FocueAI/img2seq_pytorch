@@ -7,3 +7,4 @@ data_warehouse/val_raw/*.txt
 *.pt
 *.xml
 runs/
+*.log
