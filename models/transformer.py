@@ -7,6 +7,7 @@ import torch.nn.functional as F
 
 __author__ = "Yu-Hsiang Huang"
 
+
 class ScaledDotProductAttention(nn.Module):
     ''' Scaled Dot-Product Attention '''
 
@@ -16,7 +17,6 @@ class ScaledDotProductAttention(nn.Module):
         self.dropout = nn.Dropout(attn_dropout)
 
     def forward(self, q, k, v, mask=None):
-
         attn = torch.matmul(q / self.temperature, k.transpose(2, 3))
 
         if mask is not None:
@@ -63,10 +63,10 @@ class MultiHeadAttention(nn.Module):
         v = self.w_vs(v).view(sz_b, len_v, n_head, d_v)
 
         # Transpose for attention dot product: b x n x lq x dv
-        q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)   # [batch_size, n_head, seq_len, d_k/d_v]
+        q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)  # [batch_size, n_head, seq_len, d_k/d_v]
 
         if mask is not None:
-            mask = mask.unsqueeze(1)   # For head axis broadcasting.
+            mask = mask.unsqueeze(1)  # For head axis broadcasting.
 
         q, attn = self.attention(q, k, v, mask=mask)
 
@@ -86,8 +86,8 @@ class PositionwiseFeedForward(nn.Module):
 
     def __init__(self, d_in, d_hid, dropout=0.1):
         super().__init__()
-        self.w_1 = nn.Linear(d_in, d_hid) # position-wise
-        self.w_2 = nn.Linear(d_hid, d_in) # position-wise
+        self.w_1 = nn.Linear(d_in, d_hid)  # position-wise
+        self.w_2 = nn.Linear(d_hid, d_in)  # position-wise
         self.layer_norm = nn.LayerNorm(d_in, eps=1e-6)
         self.dropout = nn.Dropout(dropout)
 
@@ -139,13 +139,8 @@ class DecoderLayer(nn.Module):
         return dec_output, dec_slf_attn, dec_enc_attn
 
 
-
-
-
-
-
 def get_pad_mask(seq, pad_idx):
-    return (seq != pad_idx).unsqueeze(-2)   # 非padding的位置处True, padding的位置为false
+    return (seq != pad_idx).unsqueeze(-2)  # 非padding的位置处True, padding的位置为false
 
 
 def get_subsequent_mask(seq):
@@ -166,6 +161,7 @@ class PositionalEncoding(nn.Module):
 
     def _get_sinusoid_encoding_table(self, n_position, d_hid):
         ''' Sinusoid position encoding table '''
+
         # TODO: make it with torch instead of numpy
 
         def get_position_angle_vec(position):
@@ -181,16 +177,40 @@ class PositionalEncoding(nn.Module):
         return x + self.pos_table[:, :x.size(1)].clone().detach()
 
 
+class SrcEmbedding(nn.Module):
+    """ 对 encoder 输入的句子做 embedding """
+
+    def __init__(self, n_src_vocab, d_word_vec, pad_idx):
+        super(SrcEmbedding, self).__init__()
+        self.src_word_emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=pad_idx)
+
+    def forward(self, raw_src_seq):
+        enc_output = self.src_word_emb(raw_src_seq)
+        return enc_output
+
+
+class TrgEmbedding(nn.Module):
+    """ 对 decoder 输入的句子做 embedding """
+
+    def __init__(self, n_trg_vocab, d_word_vec, pad_idx):
+        super(TrgEmbedding, self).__init__()
+        self.dst_word_emb = nn.Embedding(n_trg_vocab, d_word_vec, padding_idx=pad_idx)
+
+    def forward(self, raw_trg_seq):
+        dec_output = self.dst_word_emb(raw_trg_seq)
+        return dec_output
+
+
 class Encoder(nn.Module):
     ''' A encoder model with self attention mechanism. '''
 
     def __init__(
-            self, n_src_vocab, d_word_vec, n_layers, n_head, d_k, d_v,
-            d_model, d_inner, pad_idx, dropout=0.1, n_position=200, scale_emb=False):
+            self, d_word_vec, n_layers, n_head, d_k, d_v,
+            d_model, d_inner, dropout=0.1, n_position=200, scale_emb=False):
 
         super().__init__()
 
-        self.src_word_emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=pad_idx)
+        # self.src_word_emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=pad_idx)
         self.position_enc = PositionalEncoding(d_word_vec, n_position=n_position)
         self.dropout = nn.Dropout(p=dropout)
         self.layer_stack = nn.ModuleList([
@@ -200,12 +220,13 @@ class Encoder(nn.Module):
         self.scale_emb = scale_emb
         self.d_model = d_model
 
-    def forward(self, src_seq, src_mask, return_attns=False):
+    def forward(self, src_seq_embeding, src_mask, return_attns=False):
         # src_seq.shape=(batch=32, seq_len=10), src_mask.shape=(batch=32, 1, seq_len=10)
         enc_slf_attn_list = []
 
         # -- Forward
-        enc_output = self.src_word_emb(src_seq) # 把每个字符对应的索引号===>向量   enc_output.shape=(batch=32, seq_len=10, d_model= 512)
+        # enc_output = self.src_word_emb(src_seq) # 把每个字符对应的索引号===>向量   enc_output.shape=(batch=32, seq_len=10, d_model= 512)
+        enc_output = src_seq_embeding
         if self.scale_emb:
             enc_output *= self.d_model ** 0.5
         enc_output = self.dropout(self.position_enc(enc_output))  # 加上位置信息
@@ -224,12 +245,12 @@ class Decoder(nn.Module):
     ''' A decoder model with self attention mechanism. '''
 
     def __init__(
-            self, n_trg_vocab, d_word_vec, n_layers, n_head, d_k, d_v,
-            d_model, d_inner, pad_idx, n_position=200, dropout=0.1, scale_emb=False):
+            self, d_word_vec, n_layers, n_head, d_k, d_v,
+            d_model, d_inner, n_position=200, dropout=0.1, scale_emb=False):
 
         super().__init__()
 
-        self.trg_word_emb = nn.Embedding(n_trg_vocab, d_word_vec, padding_idx=pad_idx)
+        # self.trg_word_emb = nn.Embedding(n_trg_vocab, d_word_vec, padding_idx=pad_idx)
         self.position_enc = PositionalEncoding(d_word_vec, n_position=n_position)
         self.dropout = nn.Dropout(p=dropout)
         self.layer_stack = nn.ModuleList([
@@ -239,12 +260,13 @@ class Decoder(nn.Module):
         self.scale_emb = scale_emb
         self.d_model = d_model
 
-    def forward(self, trg_seq, trg_mask, enc_output, src_mask, return_attns=False):
+    def forward(self, trg_seq_embedding, trg_mask, enc_output, src_mask, return_attns=False):
 
         dec_slf_attn_list, dec_enc_attn_list = [], []
 
         # -- Forward
-        dec_output = self.trg_word_emb(trg_seq)
+        # dec_output = self.trg_word_emb(trg_seq_embedding)
+        dec_output = trg_seq_embedding
         if self.scale_emb:
             dec_output *= self.d_model ** 0.5
         dec_output = self.dropout(self.position_enc(dec_output))
@@ -262,7 +284,10 @@ class Decoder(nn.Module):
 
 
 class Transformer(nn.Module):
-    ''' A sequence to sequence model with attention mechanism. '''
+    ''' A sequence to sequence model with attention mechanism.
+    TODO: 1. 把 embedding 内容 单独 分离出去
+          2. 把 位置编码 内容 单独 分离出去
+    '''
 
     def __init__(
             self, n_src_vocab, n_trg_vocab, src_pad_idx, trg_pad_idx,
@@ -289,18 +314,21 @@ class Transformer(nn.Module):
         scale_emb = (scale_emb_or_prj == 'emb') if trg_emb_prj_weight_sharing else False
         self.scale_prj = (scale_emb_or_prj == 'prj') if trg_emb_prj_weight_sharing else False
         self.d_model = d_model
+        # 初始化
+        self.src_embeding = SrcEmbedding(n_src_vocab=n_src_vocab, d_word_vec=d_word_vec, pad_idx=src_pad_idx)
+        self.dst_embeding = TrgEmbedding(n_trg_vocab=n_trg_vocab, d_word_vec=d_word_vec, pad_idx=trg_pad_idx)
 
         self.encoder = Encoder(
-            n_src_vocab=n_src_vocab, n_position=n_position,
+            n_position=n_position,
             d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
             n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
-            pad_idx=src_pad_idx, dropout=dropout, scale_emb=scale_emb)
+            dropout=dropout, scale_emb=scale_emb)
 
         self.decoder = Decoder(
-            n_trg_vocab=n_trg_vocab, n_position=n_position,
+            n_position=n_position,
             d_word_vec=d_word_vec, d_model=d_model, d_inner=d_inner,
             n_layers=n_layers, n_head=n_head, d_k=d_k, d_v=d_v,
-            pad_idx=trg_pad_idx, dropout=dropout, scale_emb=scale_emb)
+            dropout=dropout, scale_emb=scale_emb)
 
         self.trg_word_prj = nn.Linear(d_model, n_trg_vocab, bias=False)
 
@@ -309,33 +337,38 @@ class Transformer(nn.Module):
                 nn.init.xavier_uniform_(p)
 
         assert d_model == d_word_vec, \
-        'To facilitate the residual connections, \
+            'To facilitate the residual connections, \
          the dimensions of all module outputs shall be the same.'
 
         if trg_emb_prj_weight_sharing:
             # Share the weight between target word embedding & last dense layer
-            self.trg_word_prj.weight = self.decoder.trg_word_emb.weight
-
+            # self.trg_word_prj.weight = self.decoder.trg_word_emb.weight
+            self.trg_word_prj.weight = self.dst_embeding.dst_word_emb.weight
         if emb_src_trg_weight_sharing:
-            self.encoder.src_word_emb.weight = self.decoder.trg_word_emb.weight
+            # self.encoder.src_word_emb.weight = self.decoder.trg_word_emb.weight
+            self.dst_embeding.dst_word_emb.weight = self.src_embeding.src_word_emb.weight
 
+    def forward(self, src_seq,trg_seq):  # src_seq.shape:[batch_size=32,seq_len=12],  trg_seq.shape:[batch_size=32,seq_len=22]
 
-    def forward(self, src_seq, trg_seq):  # src_seq.shape:[batch_size=32,seq_len=12],  trg_seq.shape:[batch_size=32,seq_len=22]
+        src_mask = get_pad_mask(src_seq, self.src_pad_idx)  # src_mask.shape:[batch_size=32,1,seq_len=12]
+        trg_mask = get_pad_mask(trg_seq, self.trg_pad_idx) & get_subsequent_mask(trg_seq)  # trg_mask.shape:[batch_size=32,seq_len=22,seq_len=22]
 
-        src_mask = get_pad_mask(src_seq, self.src_pad_idx) # src_mask.shape:[batch_size=32,1,seq_len=12]
-        trg_mask = get_pad_mask(trg_seq, self.trg_pad_idx) & get_subsequent_mask(trg_seq) # trg_mask.shape:[batch_size=32,seq_len=22,seq_len=22]
+        src_seq_embedding = self.src_embeding(src_seq)
+        trg_seq_embedding = self.dst_embeding(trg_seq)
+        # TODO: 实现独立的位置位置编码
 
-        enc_output, *_ = self.encoder(src_seq, src_mask)                        # enc_output.shape=[batch_size=32,seq_len=12,d_model=512]
-        dec_output, *_ = self.decoder(trg_seq, trg_mask, enc_output, src_mask)  # trg_seq.shape=   [batch_size=32,seq_len=22,d_model=512]
-        seq_logit = self.trg_word_prj(dec_output) # n_trg_vocab seq_logit.shape=[batch_size=32,seq_len=22,n_trg_vocab=100]
+        enc_output, *_ = self.encoder(src_seq_embedding,src_mask)  # enc_output.shape=[batch_size=32,seq_len=12,d_model=512]
+        dec_output, *_ = self.decoder(trg_seq_embedding, trg_mask, enc_output,src_mask)  # trg_seq.shape=   [batch_size=32,seq_len=22,d_model=512]
+        seq_logit = self.trg_word_prj(dec_output)  # n_trg_vocab seq_logit.shape=[batch_size=32,seq_len=22,n_trg_vocab=100]
         if self.scale_prj:
             seq_logit *= self.d_model ** -0.5
 
         return seq_logit.view(-1, seq_logit.size(2))
 
+
 if __name__ == '__main__':
-    src = torch.concat([torch.ones(32, 10).long(), torch.zeros(32,2).long()],dim=1)  # batch_size=32, src_len=10
-    tgt = torch.concat([torch.ones(32, 20).long(), torch.zeros(32,2).long()],dim=1)  # batch_size=32, dst_len=20
+    src = torch.concat([torch.ones(32, 10).long(), torch.zeros(32, 2).long()], dim=1)  # batch_size=32, src_len=10
+    tgt = torch.concat([torch.ones(32, 20).long(), torch.zeros(32, 2).long()], dim=1)  # batch_size=32, dst_len=20
     Trans_model = Transformer(n_src_vocab=100, n_trg_vocab=100, src_pad_idx=0, trg_pad_idx=0)
     res = Trans_model(src_seq=src, trg_seq=tgt)
     print(f'res-shape:{res.shape}, res:{res}')
