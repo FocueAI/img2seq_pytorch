@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
-# git clone https://github.com/jadore801120/attention-is-all-you-need-pytorch
+# 参考 https://github.com/jadore801120/attention-is-all-you-need-pytorch
 
 __author__ = "Alex"
 
@@ -232,10 +232,10 @@ class Encoder(nn.Module):
 
         # -- Forward
         # enc_output = self.src_word_emb(src_seq) # 把每个字符对应的索引号===>向量   enc_output.shape=(batch=32, seq_len=10, d_model= 512)
-        # enc_output = src_seq_embeding
-        # if self.scale_emb:
-        #     enc_output *= self.d_model ** 0.5
-        # enc_output = self.dropout(self.position_enc(enc_output))  # 加上位置信息
+        # enc_output = src_seq_embeding0.5
+        # enc_output = self.dropout(self
+        #         # if self.scale_emb:
+        #         #     enc_output *= self.d_model ** .position_enc(enc_output))  # 加上位置信息
         enc_output = self.dropout(src_seq_embed_posi)
         enc_output = self.layer_norm(enc_output)
 
@@ -267,7 +267,7 @@ class Decoder(nn.Module):
         self.scale_emb = scale_emb
         self.d_model = d_model
 
-    def forward(self, trg_seq_embedding, trg_mask, enc_output, src_mask, return_attns=False):
+    def forward(self, trg_seq_embed_posi, trg_mask, enc_output, src_mask, return_attns=False):
 
         dec_slf_attn_list, dec_enc_attn_list = [], []
 
@@ -278,7 +278,7 @@ class Decoder(nn.Module):
         #     dec_output *= self.d_model ** 0.5
         # dec_output = self.dropout(self.position_enc(dec_output))
 
-        dec_output = self.dropout(trg_seq_embedding)
+        dec_output = self.dropout(trg_seq_embed_posi)
         dec_output = self.layer_norm(dec_output)
 
         for dec_layer in self.layer_stack:
@@ -299,11 +299,16 @@ class Transformer(nn.Module):
     '''
 
     def __init__(
-            self, n_src_vocab, n_trg_vocab, src_pad_idx, trg_pad_idx,
-            d_word_vec=512, d_model=512, d_inner=2048,
-            n_layers=6, n_head=8, d_k=64, d_v=64, dropout=0.1, n_position=200,
-            trg_emb_prj_weight_sharing=True, emb_src_trg_weight_sharing=True,
-            scale_emb_or_prj='prj'):
+            self,
+            n_src_vocab, n_trg_vocab,  # encoder 与 decoder 词汇表的大小 ==> 主要用于 embedding
+            src_pad_idx, trg_pad_idx,  # encoder 与 decoder pad字符对应的index ==> 用途 1. embedding的参数 2. mask的依据
+            d_word_vec=512, d_model=512,  # 感觉2者应该等效, 不清楚什么要设置成2个变量
+            d_inner=2048,                # 自注意力后的前向传播维度
+            n_layers=6, n_head=8,        # encoder与decoder层数, 多头数
+            d_k=64, d_v=64,              # Q与K的最后一个维度为 d_k, V的最后一个维度为 d_v
+            dropout=0.1, n_position=200, # dropout在embedding+position后的dropout.n_position:表示最大的字符数量,在做位置编码时使用
+            trg_emb_prj_weight_sharing=True, emb_src_trg_weight_sharing=True, # 参数共享相关的
+            scale_emb_or_prj='prj'):  # 使用embedding还是使用全链接做映射
 
         super().__init__()
 
@@ -320,8 +325,8 @@ class Transformer(nn.Module):
         #   'none': no multiplication
 
         assert scale_emb_or_prj in ['emb', 'prj', 'none']
-        scale_emb = (scale_emb_or_prj == 'emb') if trg_emb_prj_weight_sharing else False
-        self.scale_prj = (scale_emb_or_prj == 'prj') if trg_emb_prj_weight_sharing else False
+        scale_emb = (scale_emb_or_prj == 'emb') if trg_emb_prj_weight_sharing else False       # 在该工程默认是 False
+        self.scale_prj = (scale_emb_or_prj == 'prj') if trg_emb_prj_weight_sharing else False  # 在该工程默认是 True
         self.d_model = d_model
         # 初始化
         # 独立出来的 embedding 层
