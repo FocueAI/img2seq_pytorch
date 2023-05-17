@@ -28,7 +28,7 @@ class BaseDataset(Dataset):
 
     def __getitem__(self, idx: int):
         """Returns a sample from the dataset at the given idx."""
-        image_filename, formula = self.img_filenames_l[idx], self.formulas_l[idx]
+        image_filename, formula, bbox = self.img_filenames_l[idx], self.formulas_l[idx], self.bboxes_l[idx]
         image_filepath = os.path.join(self.root_dir, image_filename)
         if os.path.exists(image_filepath):
             image = Image.open(image_filepath).convert('RGB')
@@ -36,9 +36,11 @@ class BaseDataset(Dataset):
             # Returns a blank image if cannot find the image
             image = Image.fromarray(np.full((64, 128), 255, dtype=np.uint8))
             formula = []
+            bbox = []
         if self.transform is not None:
             image = self.transform(image=np.array(image))["image"]
-        return image, formula
+            # TODO: bbox可能会因为图像做完数据增强后, box的位置和形状也会随着改变
+        return image, formula, bbox
 
 
 
@@ -175,7 +177,7 @@ class Tokenizer:
 def judge_invaild(formula:List,boxes:List) ->bool:
     need_box_num = len([i for i in formula if i in ['0','1','2','3','4','5','6','7','8','9','x','X','-']])
     real_box_num = len(boxes)
-    if need_box_num == real_box_num:
+    if need_box_num != real_box_num:
         return False
     return True
 
@@ -189,7 +191,7 @@ def get_all_formulas(filename: str) -> List[List[str]]:
             real_formula, real_bbox = formula.split('\t')
             real_formula_l = real_formula.strip('\n').split()
             real_bbox_l = json.loads(real_bbox.strip("\n"))
-            real_bbox_l = sorted(real_bbox_l,lambda x:(x[0]+x[2])/2) # 按照x轴上的中心坐标x做升序排序 TODO: 先不考虑想分数场景下的box排列
+            real_bbox_l = sorted(real_bbox_l,key=lambda x:(x[0]+x[2])/2) # 按照x轴上的中心坐标x做升序排序 TODO: 先不考虑想分数场景下的box排列
             judge_pass = judge_invaild(real_formula_l, real_bbox_l)
             if judge_pass: # 合法性校验通过
                 all_formulas.append(real_formula_l)
@@ -211,8 +213,11 @@ def get_split(
             formula_idx, img_name, _ = line.strip("\n").split() # formula_idx image_name render_type\n
             image_names.append(img_name)
             try:
-                formulas.append(all_formulas[int(formula_idx)-1]) # 真实的内容列表
-                bboxes.append(all_bboxes[int(formula_idx)-1])
+                this_formulas = all_formulas[int(formula_idx) - 1] # 这张图片真实的标签 ['<', '1', '^', 'dy' '>', '2', '3']
+                this_bboxes = all_bboxes[int(formula_idx)-1] # 这张图像上要做bbox回归的boxes [[20,0, 22.0, 36.0, 41.0, '6'],[40,0, 22.0, 46.0, 41.0, '5'],[60,0, 22.0, 66.0, 41.0, 'x']]
+                # TODO:这里给不需要bboxing的区域可以也加上[0,0,0,0]的伪bboxing
+                formulas.append(this_formulas) # 真实的内容列表
+                bboxes.append(this_bboxes)
             except:
                 print(f'formula_idx:{formula_idx}')
     return image_names, formulas, bboxes  # [img_name1, img_name2, ... img_namen], [label1, label2, ... labeln] 此时的label1还是一个字符串
