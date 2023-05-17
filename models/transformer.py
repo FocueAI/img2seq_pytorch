@@ -447,15 +447,15 @@ if __name__ == '__main__':
 
 
         simulation_encoder_out = torch.ones((32, 10, d_model))
-        out = decoder(trg_seq_embedding_pos, trg_mask, simulation_encoder_out, src_mask=None)
+        out = decoder(trg_seq_embedding_pos, trg_mask, simulation_encoder_out, src_mask=None,return_attns=True)
         # print(f'out.shape:{np.array(out).shape}')
         print('transformer-decoding-only..........')
         print(f'out:{out[0].shape}')
 
 
     test_level_dict = {'all':all, 'encoder':encoder_only, 'decoder':decoder_only}
-    test_level_dict['all']()
-    test_level_dict['encoder']()
+    # test_level_dict['all']()
+    # test_level_dict['encoder']()
     test_level_dict['decoder']()
 
 

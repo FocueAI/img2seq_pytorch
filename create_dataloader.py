@@ -1,4 +1,5 @@
 import os, random
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import torch
 from utils.data_deal.dataset import BaseDataset, Tokenizer, get_all_formulas, get_split
 from torch.utils.data import DataLoader
@@ -25,7 +26,7 @@ class CreateDataloader:
         formula_file = os.path.join(self.dir_path, "im2latex_formulas.lst")  # 总标签文件
         if not os.path.exists(formula_file):
             raise FileExistsError(f"can't find {formula_file}")
-        self.all_formulas = get_all_formulas(formula_file)  # 获取所有数据的标签列表
+        self.all_formulas, self.all_bboxes = get_all_formulas(formula_file)  # 获取所有数据的标签列表
         # 为图片的数据增强做准备
         self.transform = {
             "train": A.Compose(  # a. 训练数据的处理方式(包含数据增强)
@@ -61,14 +62,16 @@ class CreateDataloader:
         """
         self.tokenizer = Tokenizer.load(self.vocab_file)
         # ------------------------------  训练集处理 -------------------------------------#
-        train_image_names, train_formulas = get_split(
+        train_image_names, train_formulas, train_bboxes = get_split(
             self.all_formulas,
+            self.all_bboxes,
             os.path.join(self.dir_path, "im2latex_train.lst")  # 该文件的格式"序号 图片名称 无用的信息"
         )
         self.train_dataset = BaseDataset(  # 最基本的dataset类
             root_dir=self.train_dir,
             img_filenames_l=train_image_names,
             formulas_l=train_formulas,
+            boxes_l=train_bboxes,
             transform=self.transform["train"],  # 数据处理（增强）相关的参数
         )
         train_dataloader = DataLoader(
@@ -80,8 +83,9 @@ class CreateDataloader:
             collate_fn=self.collate_fn
         )
         # ------------------------------ 验证集处理 ---------------------------------------#
-        val_image_names, val_formulas = get_split(
+        val_image_names, val_formulas, val_bboxes = get_split(
             self.all_formulas,
+            self.all_bboxes,
             os.path.join(self.dir_path, "im2latex_val.lst")  # 该文件的格式"序号 图片名称 无用的信息"
         )
         self.val_dataset = BaseDataset(  # 最基本的dataset类
@@ -109,3 +113,4 @@ if __name__ == '__main__':
         x, y = epoch
         print(f'x-shape:{x.shape}')
         print(f'y-shape:{y.shape}')
+        print(f'y:{y}')

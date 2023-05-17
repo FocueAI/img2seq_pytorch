@@ -73,6 +73,9 @@ class ResNetTransformer(nn.Module):
                                                d_inner=2048 # TODO: 后面设置为 dim_feedforward
                                                )
         self.fc = nn.Linear(self.d_model, num_classes)
+        # 新增的
+        self.str_loc = nn.Linear(self.d_model, 4) # 其中的4表示(center_x,center_y,w,h)
+
 
         # It is empirically important to initialize weights properly
         if self.training:
@@ -163,8 +166,12 @@ class ResNetTransformer(nn.Module):
             output = self.transformer_decoder(y.permute(1,0,2),y_mask, encoded_x.permute(1,0,2), src_mask=None)
             output = output[0].permute(1,0,2)
 
-        output = self.fc(output)  # (Sy, B, num_classes)
-        return output
+        output_str_con = self.fc(output)  # (Sy, B, num_classes) 字符内容
+        # TODO: 我准备在这里加上字符定位的逻辑
+        output_str_loc = self.str_loc(output) # (Sy, B, 4) 字符定位
+
+
+        return output_str_con, output_str_loc
 
     def predict(self, x: Tensor) -> Tensor:
         """Make predctions at inference time.

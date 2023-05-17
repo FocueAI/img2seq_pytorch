@@ -16,6 +16,7 @@ class BaseDataset(Dataset):
                  root_dir: str,  # 图像数据(包含txt标签)存放的根文件地址
                  img_filenames_l: List[str],  # ['**1.jpg','**2.jpg',...'**n.png']
                  formulas_l: List[List[str]],  # [['<','2','>' ],["3", "'", "."],...[]]
+                 bboxes_l:List, # [ [[box0_x0,box0_y0,box0_x1,box0_y1],[],[] ],
                  transform: Optional[Callable] = None,  # 图像数据增强相关的
                  ) -> None:
         super(BaseDataset, self).__init__()
@@ -171,26 +172,47 @@ class Tokenizer:
             token_to_index = json.load(f)
         return cls(token_to_index)
 
+def judge_invaild(formula:List,boxes:List) ->bool:
+    need_box_num = len([i for i in formula if i in ['0','1','2','3','4','5','6','7','8','9','x','X','-']])
+    real_box_num = len(boxes)
+    if need_box_num == real_box_num:
+        return False
+    return True
 
 def get_all_formulas(filename: str) -> List[List[str]]:
     """Returns all the formulas in the formula file."""
     with open(filename,'r',encoding='utf-8') as f:
-        all_formulas = [formula.strip("\n").split() for formula in f.readlines()]
-    return all_formulas
+        contents = f.readlines()
+        # all_formulas = [formula.strip("\n").split() for formula in contents]  # 原始的
+        all_formulas, all_bboxes = [], []
+        for formula in contents:
+            real_formula, real_bbox = formula.split('\t')
+            real_formula_l = real_formula.strip('\n').split()
+            real_bbox_l = json.loads(real_bbox.strip("\n"))
+            real_bbox_l = sorted(real_bbox_l,lambda x:(x[0]+x[2])/2) # 按照x轴上的中心坐标x做升序排序 TODO: 先不考虑想分数场景下的box排列
+            judge_pass = judge_invaild(real_formula_l, real_bbox_l)
+            if judge_pass: # 合法性校验通过
+                all_formulas.append(real_formula_l)
+                all_bboxes.append(real_bbox_l)
+
+    return all_formulas, all_bboxes
 
 
 def get_split(
     all_formulas: List[List[str]],
+    all_bboxes:List,
     filename: str,
-) -> Tuple[List[str], List[List[str]]]:
+) -> Tuple[List[str], List[List[str]], List]:
     image_names = []
     formulas = []
+    bboxes = []
     with open(filename) as f:  # 对应的文件名为 im2latex_[train/test/val].lst ------ 其中对应的内容看下面for循环中的内容分解
         for line in f:
             formula_idx, img_name, _ = line.strip("\n").split() # formula_idx image_name render_type\n
             image_names.append(img_name)
             try:
                 formulas.append(all_formulas[int(formula_idx)-1]) # 真实的内容列表
+                bboxes.append(all_bboxes[int(formula_idx)-1])
             except:
                 print(f'formula_idx:{formula_idx}')
-    return image_names, formulas  # [img_name1, img_name2, ... img_namen], [label1, label2, ... labeln] 此时的label1还是一个字符串
+    return image_names, formulas, bboxes  # [img_name1, img_name2, ... img_namen], [label1, label2, ... labeln] 此时的label1还是一个字符串

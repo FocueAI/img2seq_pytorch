@@ -6,7 +6,7 @@ import json
 import shutil
 """
 该脚本的主要功能:  1. 把文件夹中成对的图片和标签======>模型所需要的格式
-                  2. 把vocab.txt转换成json格式
+                2. 把vocab.txt转换成json格式
 """
 collect_data_together = True # 是否把各个文件夹下的图片收集下来
 collect_data_dir = r'./formula_images_processed'
