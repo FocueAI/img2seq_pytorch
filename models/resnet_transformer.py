@@ -74,7 +74,7 @@ class ResNetTransformer(nn.Module):
                                                )
         self.fc = nn.Linear(self.d_model, num_classes)
         # 新增的
-        self.str_loc = nn.Linear(self.d_model, 4) # 其中的4表示(center_x,center_y,w,h)
+        self.str_loc = nn.Linear(self.d_model, 4) # 其中的4表示(x0,y0,x1,y1) TODO: 暂时定位字符的左上角和右下角
 
 
         # It is empirically important to initialize weights properly
@@ -110,9 +110,11 @@ class ResNetTransformer(nn.Module):
             (B, num_classes, Sy) logits
         """
         encoded_x = self.encode(x)  # (Sx, B, E)
-        output = self.decode(y, encoded_x)  # (Sy, B, num_classes)
-        output = output.permute(1, 2, 0)  # (B, num_classes, Sy)
-        return output
+        output = self.decode(y, encoded_x)  # (Sy, B, num_classes),(Sy, B, 4)
+        return output[0].permute(1, 2, 0),output[1].permute(1, 2, 0)
+        # output[0] = output[0].permute(1, 2, 0)  # (B, num_classes, Sy)  # 识别的字符内容
+        # output[1] = output[1].permute(1, 2, 0)  # (B, 4, Sy)            # 识别字符对应的bbox
+        # return output
 
     def encode(self, x: Tensor) -> Tensor:
         """Encode inputs.
@@ -168,7 +170,7 @@ class ResNetTransformer(nn.Module):
 
         output_str_con = self.fc(output)  # (Sy, B, num_classes) 字符内容
         # TODO: 我准备在这里加上字符定位的逻辑
-        output_str_loc = self.str_loc(output) # (Sy, B, 4) 字符定位
+        output_str_loc = self.str_loc(output).sigmoid() # (Sy, B, 4)  # 字符内容的定位
 
 
         return output_str_con, output_str_loc

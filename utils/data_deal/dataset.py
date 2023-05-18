@@ -16,7 +16,7 @@ class BaseDataset(Dataset):
                  root_dir: str,  # 图像数据(包含txt标签)存放的根文件地址
                  img_filenames_l: List[str],  # ['**1.jpg','**2.jpg',...'**n.png']
                  formulas_l: List[List[str]],  # [['<','2','>' ],["3", "'", "."],...[]]
-                 bboxes_l:List, # [ [[box0_x0,box0_y0,box0_x1,box0_y1],[],[] ],
+                 bboxes_l: List,  # [ [[box0_x0,box0_y0,box0_x1,box0_y1],[],[] ],
                  transform: Optional[Callable] = None,  # 图像数据增强相关的
                  ) -> None:
         super(BaseDataset, self).__init__()
@@ -41,10 +41,6 @@ class BaseDataset(Dataset):
             image = self.transform(image=np.array(image))["image"]
             # TODO: bbox可能会因为图像做完数据增强后, box的位置和形状也会随着改变
         return image, formula, bbox
-
-
-
-
 
 
 class Tokenizer:
@@ -174,50 +170,72 @@ class Tokenizer:
             token_to_index = json.load(f)
         return cls(token_to_index)
 
-def judge_invaild(formula:List,boxes:List) ->bool:
-    need_box_num = len([i for i in formula if i in ['0','1','2','3','4','5','6','7','8','9','x','X','-']])
+
+def judge_invaild(formula: List, boxes: List) -> bool:
+    need_box_num = len([i for i in formula if i in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'x', 'X', '-']])
     real_box_num = len(boxes)
     if need_box_num != real_box_num:
         return False
     return True
 
+
+has_question_file_l = []
+
+
 def get_all_formulas(filename: str) -> List[List[str]]:
     """Returns all the formulas in the formula file."""
-    with open(filename,'r',encoding='utf-8') as f:
+    with open(filename, 'r', encoding='utf-8') as f:
         contents = f.readlines()
         # all_formulas = [formula.strip("\n").split() for formula in contents]  # 原始的
         all_formulas, all_bboxes = [], []
-        for formula in contents:
+        for line_no, formula in enumerate(contents):
             real_formula, real_bbox = formula.split('\t')
             real_formula_l = real_formula.strip('\n').split()
             real_bbox_l = json.loads(real_bbox.strip("\n"))
-            real_bbox_l = sorted(real_bbox_l,key=lambda x:(x[0]+x[2])/2) # 按照x轴上的中心坐标x做升序排序 TODO: 先不考虑想分数场景下的box排列
+            real_bbox_l = sorted(real_bbox_l,
+                                 key=lambda x: (x[0] + x[2]) / 2)  # 按照x轴上的中心坐标x做升序排序 TODO: 先不考虑想分数场景下的box排列
             judge_pass = judge_invaild(real_formula_l, real_bbox_l)
-            if judge_pass: # 合法性校验通过
+            # assert judge_pass==True
+            if judge_pass:  # 合法性校验通过
                 all_formulas.append(real_formula_l)
                 all_bboxes.append(real_bbox_l)
-
+            else:
+                has_question_file_l.append(line_no + 1)
+    print(f'has_question_file_l:{has_question_file_l}')
     return all_formulas, all_bboxes
 
 
 def get_split(
-    all_formulas: List[List[str]],
-    all_bboxes:List,
-    filename: str,
+        all_formulas: List[List[str]],
+        all_bboxes: List,
+        filename: str,
 ) -> Tuple[List[str], List[List[str]], List]:
     image_names = []
     formulas = []
     bboxes = []
+    has_bbox_str_l = list(map(str, range(0, 10))) + ['x', 'X', '-']
     with open(filename) as f:  # 对应的文件名为 im2latex_[train/test/val].lst ------ 其中对应的内容看下面for循环中的内容分解
         for line in f:
-            formula_idx, img_name, _ = line.strip("\n").split() # formula_idx image_name render_type\n
+            formula_idx, img_name, _ = line.strip("\n").split()  # formula_idx image_name render_type\n
             image_names.append(img_name)
             try:
-                this_formulas = all_formulas[int(formula_idx) - 1] # 这张图片真实的标签 ['<', '1', '^', 'dy' '>', '2', '3']
-                this_bboxes = all_bboxes[int(formula_idx)-1] # 这张图像上要做bbox回归的boxes [[20,0, 22.0, 36.0, 41.0, '6'],[40,0, 22.0, 46.0, 41.0, '5'],[60,0, 22.0, 66.0, 41.0, 'x']]
-                # TODO:这里给不需要bboxing的区域可以也加上[0,0,0,0]的伪bboxing
-                formulas.append(this_formulas) # 真实的内容列表
-                bboxes.append(this_bboxes)
-            except:
+                this_formulas = all_formulas[int(formula_idx) - 1]  # 这张图片真实的标签 ['<', '1', '^', 'dy' '>', '2', '3']
+                this_bboxes = all_bboxes[
+                    int(formula_idx) - 1]  # 这张图像上要做bbox回归的boxes [[20,0, 22.0, 36.0, 41.0, '6'],[40,0, 22.0, 46.0, 41.0, '5'],[60,0, 22.0, 66.0, 41.0, 'x']]
+                this_bboxes_tmp = []
+                # TODO:这里给不需要bboxing的区域可以也加上[0,0,0,0,'null']的伪bboxing
+                this_img_has_bbox_count = 0
+                for this_str in this_formulas:
+                    if this_str in has_bbox_str_l:
+                        this_bboxes_tmp.append(this_bboxes[this_img_has_bbox_count])
+                        this_img_has_bbox_count += 1
+                    else:
+                        this_bboxes_tmp.append([0, 0, 0, 0, 'null'])  # 表示此位置上是一个无效的bbox
+
+                formulas.append(this_formulas)  # 真实的内容列表
+                bboxes.append(this_bboxes_tmp)
+            except Exception as e:
+                print('=' * 10)
+                print(f'find a err:{e}')
                 print(f'formula_idx:{formula_idx}')
     return image_names, formulas, bboxes  # [img_name1, img_name2, ... img_namen], [label1, label2, ... labeln] 此时的label1还是一个字符串

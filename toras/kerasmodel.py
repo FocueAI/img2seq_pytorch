@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import torch
 from accelerate import Accelerator
-
+from torchvision.ops.boxes import box_area
 
 def colorful(obj, color="red", display_type="plain"):
     color_dict = {"black": "30", "red": "31", "green": "32", "yellow": "33",
@@ -18,6 +18,51 @@ def colorful(obj, color="red", display_type="plain"):
     out = '\033[{};{}m'.format(display, color_code) + s + '\033[0m'
     return out
 
+# modified from torchvision to also return the union
+def box_iou(boxes1, boxes2):
+    area1 = box_area(boxes1)
+    area2 = box_area(boxes2)
+
+    lt = torch.max(boxes1[:, None, :2], boxes2[:, :2])  # [N,M,2]
+    rb = torch.min(boxes1[:, None, 2:], boxes2[:, 2:])  # [N,M,2]
+
+    wh = (rb - lt).clamp(min=0)  # [N,M,2]
+    inter = wh[:, :, 0] * wh[:, :, 1]  # [N,M]
+
+    union = area1[:, None] + area2 - inter
+
+    iou = inter / union
+    return iou, union
+
+
+def generalized_box_iou(boxes1, boxes2):
+    """
+    Generalized IoU from https://giou.stanford.edu/
+
+    The boxes should be in [x0, y0, x1, y1] format
+
+    Returns a [N, M] pairwise matrix, where N = len(boxes1)
+    and M = len(boxes2)
+    """
+    # degenerate boxes gives inf / nan results
+    # so do an early check
+    assert (boxes1[:, 2:] >= boxes1[:, :2]).all()
+    assert (boxes2[:, 2:] >= boxes2[:, :2]).all()
+    iou, union = box_iou(boxes1, boxes2)
+
+    lt = torch.min(boxes1[:, None, :2], boxes2[:, :2])
+    rb = torch.max(boxes1[:, None, 2:], boxes2[:, 2:])
+
+    wh = (rb - lt).clamp(min=0)  # [N,M,2]
+    area = wh[:, :, 0] * wh[:, :, 1]
+
+    return iou - (area - union) / area
+
+def box_cxcywh_to_xyxy(x):
+    x_c, y_c, w, h = x.unbind(-1)
+    b = [(x_c - 0.5 * w), (y_c - 0.5 * h),
+         (x_c + 0.5 * w), (y_c + 0.5 * h)]
+    return torch.stack(b, dim=-1)
 
 class StepRunner:  # 数据跑一步的逻辑
     def __init__(self, net, loss_fn, accelerator, stage="train", metrics_dict=None,
@@ -28,7 +73,7 @@ class StepRunner:  # 数据跑一步的逻辑
         self.accelerator = accelerator
 
     def __call__(self, batch):
-        features, labels = batch
+        features, labels, boxes = batch
 
         # loss
         ##----------------- 原始的写法 --------------------##
@@ -36,7 +81,31 @@ class StepRunner:  # 数据跑一步的逻辑
         # loss = self.loss_fn(preds, labels)
         ##----------------- 修改后的写法 ------------------##
         preds = self.net(features, labels[:,:-1])
-        loss = self.loss_fn(preds, labels[:,1:])
+        loss_str = self.loss_fn(preds[0], labels[:,1:]) # 识别字符的交叉熵损失
+        loss_bbos = 0
+        #########################
+        # 标签值: boxes.shape = [batch_size=16, bbox_num=31, 4=[x0,y0,x1,y1]]
+        # 预测值: preds[1].shape = [batch_size=16, 4=[x0,y0,x1,y1], bbox_num=30]
+        # pred_boxes = preds[1].premute(0,2,1) # pred_box.shape=[batch_size=16, bbox_num=30, 4=[x0,y0,x1,y1]]
+
+        pred_boxes = torch.permute(preds[1],(0,2,1))
+
+        label_boxes= boxes[:, 1:, :]           # pred_box.shape=[batch_size=16, bbox_num=30, 4=[x0,y0,x1,y1]] ----> 因为第0个是<bos>要去掉
+        real_vail_pred_boxes, real_vail_label_boxes = [], []
+        for index, this_bbox in enumerate(label_boxes):
+            if this_bbox.sum() > 0.01:
+                real_vail_pred_boxes.append(pred_boxes[index].detach().numpy())
+                real_vail_label_boxes.append(label_boxes[index].detach().numpy())
+        pred_boxes_torch = torch.from_numpy(np.array(real_vail_pred_boxes))
+        label_boxes_torch = torch.from_numpy(np.array(real_vail_label_boxes))
+        # print('1212212')
+        all_batch_pred_boxes = pred_boxes_torch.view(-1,4)
+        all_batch_label_boxes = label_boxes_torch.view(-1,4)
+        giou_loss = 1- torch.diag(generalized_box_iou(box_cxcywh_to_xyxy(all_batch_pred_boxes),box_cxcywh_to_xyxy(all_batch_label_boxes)))
+        box_loss_l1 = 0 # torch.cdist(pred_boxes_torch,label_boxes_torch)
+
+        #########################
+        loss = loss_str + giou_loss.sum()/giou_loss.size(0) #+ box_loss_l1
         ## ----------------------------------------------##
         
 

@@ -16,12 +16,12 @@ VIEW_MODEL_STRUCTURE = False
 tensorboard_record = TensorBoardCallback(save_dir='runs',model_name='img2seq', log_weight=True,log_weight_freq=5)
 
 # step2: 创建训练/验证数据迭代器
-dataloader_creator = CreateDataloader(batch_size=16,num_workers=2,pin_memory=True,dir_path='data_warehouse',
+dataloader_creator = CreateDataloader(batch_size=16,num_workers=0,pin_memory=True,dir_path='data_warehouse',
                                       train_dir_name='train_raw',val_dir_name='val_raw')
 train_dataloader, val_dataloader = dataloader_creator.do()
 
 # step3: 创建模型/损失函数/评价指标
-img2seq_model, loss_fn, tokenizer = Img2Seq(d_model=128*2, dim_feedforward=256*2, nhead=8,
+img2seq_model, loss_fn, tokenizer = Img2Seq(d_model=128, dim_feedforward=256, nhead=1,
                                           dropout=0.3, num_decoder_layers=6,
                                           max_output_len=150,
                                           vocab_path='data_warehouse/vocab.json'
