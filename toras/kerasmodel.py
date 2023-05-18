@@ -104,7 +104,7 @@ class StepRunner:  # 数据跑一步的逻辑
         giou_loss = 1- torch.diag(generalized_box_iou(box_cxcywh_to_xyxy(all_batch_pred_boxes),box_cxcywh_to_xyxy(all_batch_label_boxes)))
         box_loss_l1 = 0 # torch.cdist(pred_boxes_torch,label_boxes_torch)
 
-        #########################
+        ######################### TODO: 损失函数依然可以继续补充.......
         loss = loss_str + giou_loss.sum()/giou_loss.size(0) #+ box_loss_l1
         ## ----------------------------------------------##
         
