@@ -6,6 +6,7 @@ import pandas as pd
 import torch
 from accelerate import Accelerator
 from torchvision.ops.boxes import box_area
+import torch.nn.functional as F
 
 def colorful(obj, color="red", display_type="plain"):
     color_dict = {"black": "30", "red": "31", "green": "32", "yellow": "33",
@@ -71,6 +72,7 @@ class StepRunner:  # 数据跑一步的逻辑
         self.net, self.loss_fn, self.metrics_dict, self.stage = net, loss_fn, metrics_dict, stage
         self.optimizer, self.lr_scheduler = optimizer, lr_scheduler
         self.accelerator = accelerator
+        self.mse_fn = torch.nn.MSELoss()
 
     def __call__(self, batch):
         features, labels, boxes = batch
@@ -80,36 +82,119 @@ class StepRunner:  # 数据跑一步的逻辑
         # preds = self.net(features)
         # loss = self.loss_fn(preds, labels)
         ##----------------- 修改后的写法 ------------------##
-        preds = self.net(features, labels[:,:-1])
-        loss_str = self.loss_fn(preds[0], labels[:,1:]) # 识别字符的交叉熵损失
-        loss_bbos = 0
-        #########################
-        # 标签值: boxes.shape = [batch_size=16, bbox_num=31, 4=[x0,y0,x1,y1]]
-        # 预测值: preds[1].shape = [batch_size=16, 4=[x0,y0,x1,y1], bbox_num=30]
-        # pred_boxes = preds[1].premute(0,2,1) # pred_box.shape=[batch_size=16, bbox_num=30, 4=[x0,y0,x1,y1]]
+        preds = self.net(features, labels[:,:-1])    # preds[0].shape=[]
+        
+        # ------------- 当decode每一层都输出计算损失时 -------------------- #
+        if isinstance(preds[0],list) and isinstance(preds[1],list):
+            # TODO: 每一decode输出都计算损失, 参考detr是怎么处理各层损失的!
+            loss_str_l, loss_bbox_l = [], []
+            for pred_str, pred_bbox in zip(preds[0], preds[1]):
+                # step1: 记录每一层decode的字符损失
+                loss_str = self.loss_fn(pred_str, labels[:,1:]) 
+                loss_str_l.append(loss_str)
+                
+                # step2: 记录每一层decode的bbox回归损失
+                pred_boxes = torch.permute(pred_bbox,(0,2,1))
+                label_boxes= boxes[:, 1:, :] 
+                
+                all_batch_pred_boxes = pred_boxes.reshape(-1,4).contiguous()
+                all_batch_label_boxes = label_boxes.reshape(-1,4).contiguous() 
+                ########################### 找到不是全0的坐标值索引 begin ################################
+                mask = torch.gt(all_batch_label_boxes, 0.0)
+                all_batch_label_boxes_ = torch.masked_select(all_batch_label_boxes, mask).view(-1,4)
+                all_batch_pred_boxes_ = torch.masked_select(all_batch_pred_boxes, mask).view(-1,4)
+                
+                # --------->  giou
+                pred_box_xyxy = box_cxcywh_to_xyxy(all_batch_pred_boxes_)
+                target_box_xyxy = box_cxcywh_to_xyxy(all_batch_label_boxes_)
+                loss_giou = 1 - torch.diag(generalized_box_iou(pred_box_xyxy, target_box_xyxy))
+                loss_giou = loss_giou.sum() / len(all_batch_label_boxes)
 
-        pred_boxes = torch.permute(preds[1],(0,2,1))
+                # ---------> L1损失
+                box_loss_l1 = F.l1_loss(all_batch_pred_boxes, all_batch_label_boxes,reduction='none')
+                box_loss_l1 = box_loss_l1.sum()/len(all_batch_label_boxes)
+                
+                # ---------> 中心点x,y回归损失
+                center_x_loss = self.mse_fn(all_batch_pred_boxes[...,0], all_batch_label_boxes[...,0])*10
+                center_y_loss = self.mse_fn(all_batch_pred_boxes[...,1], all_batch_label_boxes[...,1])*1
+                center_xy_loss = center_x_loss + center_y_loss
+                # ---------> 宽高回归损失
+                box_wh_loss = self.mse_fn(all_batch_pred_boxes[...,2:], all_batch_label_boxes[...,2:])*1
+                box_loss = box_loss_l1 + center_xy_loss + box_wh_loss + loss_giou*2 + box_loss_l1
+                loss_bbox_l.append(box_loss)
+        
+        else:
+            loss_str = self.loss_fn(preds[0], labels[:,1:]) # 识别字符的交叉熵损失 ---->preds[0].shape=[batch=16,num_class=45,seq_len=37], labels[:,1:].shape=[batch=16,seq_len=37]
+            # loss_bbos = 0
+            #########################
+            # 标签值: boxes.shape = [batch_size=16, bbox_num=31, 4=[x0,y0,x1,y1]]
+            # 预测值: preds[1].shape = [batch_size=16, 4=[x0,y0,x1,y1], bbox_num=30]
+            # pred_boxes = preds[1].premute(0,2,1) # pred_box.shape=[batch_size=16, bbox_num=30, 4=[x0,y0,x1,y1]]
 
-        label_boxes= boxes[:, 1:, :]           # pred_box.shape=[batch_size=16, bbox_num=30, 4=[x0,y0,x1,y1]] ----> 因为第0个是<bos>要去掉
-        real_vail_pred_boxes, real_vail_label_boxes = [], []
-        for index, this_bbox in enumerate(label_boxes):
-            if this_bbox.sum() > 0.01:
-                real_vail_pred_boxes.append(pred_boxes[index].detach().numpy())
-                real_vail_label_boxes.append(label_boxes[index].detach().numpy())
-        pred_boxes_torch = torch.from_numpy(np.array(real_vail_pred_boxes))
-        label_boxes_torch = torch.from_numpy(np.array(real_vail_label_boxes))
-        # print('1212212')
-        all_batch_pred_boxes = pred_boxes_torch.view(-1,4)
-        all_batch_label_boxes = label_boxes_torch.view(-1,4)
-        giou_loss = 1- torch.diag(generalized_box_iou(box_cxcywh_to_xyxy(all_batch_pred_boxes),box_cxcywh_to_xyxy(all_batch_label_boxes)))
-        box_loss_l1 = 0 # torch.cdist(pred_boxes_torch,label_boxes_torch)
+            pred_boxes = torch.permute(preds[1],(0,2,1)) # pred_boxes.shape=[batch=16,seq_len=37,4]
 
-        ######################### TODO: 损失函数依然可以继续补充.......
-        loss = loss_str + giou_loss.sum()/giou_loss.size(0) #+ box_loss_l1
+            label_boxes= boxes[:, 1:, :]           # pred_box.shape=[batch_size=16, bbox_num=30, 4=[x0,y0,x1,y1]] ----> 因为第0个是<bos>要去掉
+            # real_vail_pred_boxes, real_vail_label_boxes = [], []
+            # for index, this_bbox in enumerate(label_boxes):
+            #     if this_bbox.sum() > 0.01:
+            #         real_vail_pred_boxes.append(pred_boxes[index].cpu().detach().numpy())
+            #         real_vail_label_boxes.append(label_boxes[index].cpu().detach().numpy())
+            # pred_boxes_torch = torch.from_numpy(np.array(real_vail_pred_boxes))
+            # label_boxes_torch = torch.from_numpy(np.array(real_vail_label_boxes))
+            # print('1212212')
+            all_batch_pred_boxes = pred_boxes.reshape(-1,4).contiguous()
+            all_batch_label_boxes = label_boxes.reshape(-1,4).contiguous() 
+            ########################### 找到不是全0的坐标值索引 begin ################################
+            mask = torch.gt(all_batch_label_boxes, 0.0)
+            all_batch_label_boxes_ = torch.masked_select(all_batch_label_boxes, mask).view(-1,4)
+            
+            all_batch_pred_boxes_ = torch.masked_select(all_batch_pred_boxes, mask).view(-1,4)
+            
+            
+            ########################### 找到不是全0的坐标值索引 end ################################
+            # giou_loss = 0 # 1- torch.diag(generalized_box_iou(box_cxcywh_to_xyxy(all_batch_pred_boxes),box_cxcywh_to_xyxy(all_batch_label_boxes)))
+            # box_loss_l1 = 0 # torch.cdist(pred_boxes_torch,label_boxes_torch)
+            # ---------> L1损失
+            box_loss_l1 = F.l1_loss(all_batch_pred_boxes, all_batch_label_boxes,reduction='none')
+            box_loss_l1 = box_loss_l1.sum()/len(all_batch_label_boxes)
+            ############################## giou
+            pred_box_xyxy = box_cxcywh_to_xyxy(all_batch_pred_boxes_)
+            target_box_xyxy = box_cxcywh_to_xyxy(all_batch_label_boxes_)
+            # assert (target_box_xyxy[:, 2:] >= target_box_xyxy[:, :2]).all()
+            
+            loss_giou = 1 - torch.diag(generalized_box_iou(pred_box_xyxy, target_box_xyxy))
+            loss_giou = loss_giou.sum() / len(all_batch_label_boxes)
+            
+            
+            # box_loss_l1 = box_loss_l1
+            # ---------> 中心点回归损失
+            # center_xy_loss = self.mse_fn(all_batch_pred_boxes[...,0:2], all_batch_label_boxes[...,0:2])*20000
+            center_x_loss = self.mse_fn(all_batch_pred_boxes[...,0], all_batch_label_boxes[...,0])*2
+            center_y_loss = self.mse_fn(all_batch_pred_boxes[...,1], all_batch_label_boxes[...,1])*1
+            center_xy_loss = center_x_loss + center_y_loss
+            # ---------> 宽高回归损失
+            box_wh_loss = self.mse_fn(all_batch_pred_boxes[...,2:], all_batch_label_boxes[...,2:])*1
+            
+            
+            
+            
+            ######################### TODO: 损失函数依然可以继续补充.......
+            # giou_loss_v = giou_loss.sum()/giou_loss.size(0)
+            loss = loss_str + box_loss_l1 + center_xy_loss + box_wh_loss + loss_giou*2 + box_loss_l1
         ## ----------------------------------------------##
         
 
         # backward()
+        # 不同层的decode的输出应该拥有不同的惩罚
+        penalty_factor_diff_layers = [1, 1, 1, 1, 2, 4] # 默认是6层decode层
+        loss_str_l  = [a*b for a,b in zip(loss_str_l, penalty_factor_diff_layers)]
+        loss_bbox_l = [a*b for a,b in zip(loss_bbox_l, penalty_factor_diff_layers)]
+        
+        
+        loss_str_l_v = sum(loss_str_l)
+        label_boxes_v = sum(loss_bbox_l)
+        loss = loss_str_l_v + label_boxes_v
+        
         if self.optimizer is not None and self.stage == "train":
             self.accelerator.backward(loss)
             self.optimizer.step()
@@ -122,7 +207,9 @@ class StepRunner:  # 数据跑一步的逻辑
         all_loss = self.accelerator.gather(loss).sum()
 
         # losses
-        step_losses = {self.stage + "_loss": all_loss.item()}
+        # step_losses = {self.stage + "_loss": all_loss.item()} # 原始写法
+        # step_losses = {self.stage + "_loss": all_loss.item(),self.stage +'_str_loss': loss_str.item(),self.stage +'_xy_loss':center_xy_loss.item(),self.stage +'_wh_loss':box_wh_loss.item(),self.stage +'_giou_loss':loss_giou.item()}
+        step_losses = {self.stage + "_loss": all_loss.item(),self.stage +'_str_loss': loss_str_l_v.item(),self.stage +'box_loss': label_boxes_v.item()}
 
         # metrics
         step_metrics = {self.stage + "_" + name: metric_fn(all_preds, all_labels).item()  # 这里主要就是算准确率, 使用的很巧妙...
@@ -149,7 +236,7 @@ class EpochRunner:  # 数据跑一个epoch的逻辑(要调用数据跑一步的�
                     total=len(dataloader),
                     file=sys.stdout,
                     disable=not self.accelerator.is_local_main_process or self.quiet,
-                    ncols=100,
+                    ncols=200,
                     desc=f'{self.stage.upper()}-INFO==>'
                     )
 

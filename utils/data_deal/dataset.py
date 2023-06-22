@@ -6,6 +6,39 @@ from PIL import Image
 import numpy as np
 import json
 
+def letterbox_image(image, boxes, size=(275,50)):
+    '''resize image with unchanged aspect ratio using padding
+    image: 原pil图像
+    boxes: 该图像对应的box列表 [[x0,y0,x1,y1],[x0,y0,x1,y1],...] --->box的格式为左上角坐标与右下角坐标
+    size:  (处理后的图像的_w, 处理后的图像的_h)
+    '''
+    iw, ih = image.size
+    w, h = size
+    scale = min(w/iw, h/ih) # 想要的尺寸/图像原本的尺寸
+    nw = int(iw*scale)      # 新的图像的尺寸_w
+    nh = int(ih*scale)      # 新的图像的尺寸_h
+
+    image = image.resize((nw,nh), Image.BICUBIC)
+    new_image = Image.new('RGB', size, (255,255,255))
+    # new_image.paste(image, ((w-nw)//2, (h-nh)//2))
+    new_image.paste(image, (0, 0))
+    ########### 由于图像的位置发生变化,对应的box也要产生相应的变换
+    arr_boxes = np.array(boxes)
+    # arr_boxes[:,[0,2]] = arr_boxes[:,[0,2]] * scale # +dx
+    # arr_boxes[:,[1,3]] = arr_boxes[:,[1,3]] * scale # +dy 为了以后的放置位置随机做准备(现在默认是放在左上角)
+    # scale=1
+    boxes_x = arr_boxes[:,[0,2]].astype(np.float) * scale
+    boxes_y = arr_boxes[:,[1,3]].astype(np.float) * scale
+    lables = arr_boxes[:,-1]
+    
+    boxes_x_l = boxes_x.tolist()
+    boxes_y_l = boxes_y.tolist()
+    lables_l = lables.tolist()
+    
+    boxes = [[x[0],y[0],x[1],y[1],l] for x,y,l in zip(boxes_x_l, boxes_y_l, lables_l)]
+    ###########
+    
+    return new_image,boxes
 
 class BaseDataset(Dataset):
     """
@@ -32,6 +65,8 @@ class BaseDataset(Dataset):
         image_filepath = os.path.join(self.root_dir, image_filename)
         if os.path.exists(image_filepath):
             image = Image.open(image_filepath).convert('RGB')
+            image, bbox = letterbox_image(image, bbox)
+
         else:
             # Returns a blank image if cannot find the image
             image = Image.fromarray(np.full((64, 128), 255, dtype=np.uint8))

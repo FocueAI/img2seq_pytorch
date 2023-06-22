@@ -49,7 +49,7 @@ support_img_format = ['.png','.jpg']
 words_num, word_error_num = 0, 0
 right_count, tot_count = 0, 0
 transform = ToTensorV2()
-file_dir = r'/usr/hsc_project/latexOCR/img2seq_pytorch/data_warehouse/test_raw'
+file_dir = r'/usr/hsc_project/latexOCR/img2seq_pytorch/data_warehouse/train-checked'
 for i in os.listdir(file_dir):
     file_name, extend_name = os.path.splitext(i)
     if extend_name in support_img_format:
@@ -62,7 +62,7 @@ for i in os.listdir(file_dir):
         image = Image.open(file_path).convert("RGB")
         image_tensor = transform(image=np.array(image))["image"]  # type: ignore
 
-        pred = img2seq_model.predict(image_tensor.unsqueeze(0).float())[0]
+        pred,_ = img2seq_model.predict(image_tensor.unsqueeze(0).float())
         # print(f'len:{len(pred)},raw-pred:{pred}')
         decoded = tokenizer.decode(pred.tolist())
         pre_str = " ".join(decoded)
